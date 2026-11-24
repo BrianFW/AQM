@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Air Monitor</title>
+<meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Air Monitor">
+<style>
+/* =========================================================================
+   Air Monitor dashboard — single file, no build step, no dependencies.
+   Edit CONFIG in the <script> at the bottom to point it at your Apps Script.
+   ========================================================================= */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;   --surface: #ffffff;  --surface-2: #f0efec;
+  --ink: #0b0b0b;    --ink-2: #52514e;    --muted: #898781;
+  --grid: #e1e0d9;   --axis: #c3c2b7;     --border: rgba(11,11,11,.10);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;          /* series */
+  --good: #0ca30c; --warn: #fab219; --serious: #ec835a; --crit: #d03b3b;
+  --good-ink: #006300;
+  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;  --surface: #1a1a19;  --surface-2: #262624;
+    --ink: #f0efec;   --ink-2: #c3c2b7;    --muted: #898781;
+    --grid: #2c2c2a;  --axis: #383835;     --border: rgba(255,255,255,.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+    --good-ink: #0ca30c;
+    --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--page); color: var(--ink);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased; }
+body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.app { max-width: 720px; margin: 0 auto; padding: 16px 16px 48px; }
+header { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 14px; }
+header h1 { font-size: 19px; font-weight: 650; margin: 0; letter-spacing: -.01em; }
+.sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.iconbtn { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  width: 40px; height: 40px; display: grid; place-items: center; color: var(--ink-2); cursor: pointer; }
+.iconbtn:active { transform: scale(.96); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px;
+  padding: 18px; box-shadow: var(--shadow); margin-bottom: 14px; }
+.card h2 { font-size: 13px; font-weight: 600; color: var(--ink-2); margin: 0 0 10px;
+  text-transform: uppercase; letter-spacing: .06em; }
+
+/* Hero: small particles */
+.hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.hero .num { font-size: 56px; font-weight: 700; line-height: 1; letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums; }
+.hero .unit { color: var(--muted); font-size: 14px; margin-left: 6px; font-weight: 500; }
+.hero .what { color: var(--ink-2); font-size: 14px; margin-top: 8px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 6px 12px;
+  font-size: 13px; font-weight: 600; white-space: nowrap; }
+.pill .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.pill.good { background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--good-ink); }
+.pill.warn { background: color-mix(in srgb, var(--warn) 22%, transparent); color: #7a5300; }
+.pill.crit { background: color-mix(in srgb, var(--crit) 14%, transparent); color: var(--crit); }
+@media (prefers-color-scheme: dark) { .pill.warn { color: var(--warn); } }
+.spark { margin-top: 14px; }
+
+/* Metric tiles */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.tile { background: var(--surface-2); border-radius: 14px; padding: 12px 14px; position: relative; }
+.tile .k { color: var(--ink-2); font-size: 12px; font-weight: 600; }
+.tile .v { font-size: 24px; font-weight: 650; letter-spacing: -.02em; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.tile .v small { font-size: 12px; color: var(--muted); font-weight: 500; margin-left: 4px; }
+.tile .lim { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.tile.over { outline: 2px solid var(--crit); outline-offset: -2px; }
+.tile.over .k::after { content: " • over limit"; color: var(--crit); }
+
+/* Status strip */
+.status { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--ink-2); font-size: 13px; }
+.status b { color: var(--ink); font-weight: 600; }
+.status .stale { color: var(--crit); font-weight: 600; }
+
+/* Segmented control + selects */
+.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.seg { display: inline-flex; background: var(--surface-2); border-radius: 10px; padding: 3px; }
+.seg button { border: 0; background: transparent; color: var(--ink-2); padding: 6px 12px; border-radius: 8px;
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+select, input, textarea { font: inherit; color: var(--ink); background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 8px 10px; }
+select { padding-right: 28px; }
+
+/* Charts */
+.chart { width: 100%; height: 230px; display: block; touch-action: pan-y; }
+.chart text { font: 11px system-ui, sans-serif; fill: var(--muted); }
+.chart .grid { stroke: var(--grid); stroke-width: 1; }
+.chart .axis { stroke: var(--axis); stroke-width: 1; }
+.chart .line { fill: none; stroke: var(--s1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .area { fill: var(--s1); opacity: .08; }
+.chart .limit { stroke: var(--crit); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.chart .limit-label { fill: var(--crit); font-weight: 600; }
+.chart .ep { stroke: var(--s2); stroke-width: 2; }
+.chart .ep-dot { fill: var(--s2); }
+.chart .al { fill: var(--crit); }
+.chart .range { fill: var(--s1); opacity: .35; }
+.chart .avg { fill: var(--s1); }
+.chart .cross { stroke: var(--axis); stroke-width: 1; }
+.chart .tt-bg { fill: var(--surface); stroke: var(--border); }
+.chart .tt-text { fill: var(--ink); font-weight: 600; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--ink-2); font-size: 12px; margin-top: 6px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+/* Lists */
+.list { list-style: none; margin: 0; padding: 0; }
+.list li { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--grid); }
+.list li:first-child { border-top: 0; padding-top: 0; }
+.list .t { color: var(--muted); font-size: 12px; white-space: nowrap; min-width: 86px; padding-top: 2px; }
+.list .m { flex: 1; }
+.list .m small { color: var(--ink-2); display: block; }
+.badge { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 6px; background: var(--surface-2); color: var(--ink-2); }
+.sev1 { background: color-mix(in srgb, var(--warn) 25%, transparent); color: #7a5300; }
+.sev2 { background: color-mix(in srgb, var(--serious) 25%, transparent); color: #8a3a16; }
+.sev3 { background: color-mix(in srgb, var(--crit) 18%, transparent); color: var(--crit); }
+.empty { color: var(--muted); font-size: 13px; }
+.linkbtn { background: none; border: 0; color: var(--s1); font: inherit; font-size: 13px; font-weight: 600; padding: 0; cursor: pointer; }
+
+/* Big episode button */
+.btn { display: block; width: 100%; border: 0; border-radius: 14px; padding: 15px; font: inherit; font-size: 16px;
+  font-weight: 650; cursor: pointer; background: var(--s2); color: #fff; }
+.btn.secondary { background: var(--surface-2); color: var(--ink); }
+.btn:active { transform: scale(.99); }
+.btn[disabled] { opacity: .5; }
+
+/* Modal */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: flex-end; justify-content: center; z-index: 10; }
+.modal.open { display: flex; }
+.sheet { background: var(--surface); width: 100%; max-width: 560px; border-radius: 22px 22px 0 0; padding: 20px 20px calc(20px + env(safe-area-inset-bottom));
+  max-height: 90vh; overflow: auto; }
+@media (min-width: 600px) { .modal { align-items: center; } .sheet { border-radius: 22px; } }
+.sheet h3 { margin: 0 0 12px; font-size: 18px; }
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 13px; color: var(--ink-2); font-weight: 600; margin-bottom: 5px; }
+.field input, .field textarea, .field select { width: 100%; }
+.field textarea { min-height: 70px; resize: vertical; }
+.sevpick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.sevpick button { border: 1px solid var(--border); background: var(--surface-2); border-radius: 10px; padding: 10px; font: inherit; font-weight: 600; color: var(--ink); cursor: pointer; }
+.sevpick button[aria-pressed="true"] { background: var(--s2); color: #fff; border-color: var(--s2); }
+.limits-grid { display: grid; grid-template-columns: 1fr 96px 44px; gap: 8px 10px; align-items: center; }
+.limits-grid .h { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.limits-grid .n { font-size: 14px; }
+.limits-grid .n small { color: var(--muted); display: block; font-size: 12px; }
+.limits-grid input[type=number] { width: 100%; text-align: right; }
+.limits-grid input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--s1); }
+.actions { display: flex; gap: 10px; margin-top: 16px; }
+.actions .btn { flex: 1; padding: 13px; }
+.hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+.err { color: var(--crit); font-size: 13px; margin-top: 8px; }
+
+/* PIN screen */
+.gate { max-width: 360px; margin: 18vh auto 0; text-align: center; }
+.gate input { font-size: 28px; letter-spacing: .3em; text-align: center; width: 100%; padding: 12px; }
+.spin { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--ink-2);
+  border-radius: 50%; animation: sp .8s linear infinite; vertical-align: middle; }
+@keyframes sp { to { transform: rotate(360deg); } }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--page);
+  padding: 10px 16px; border-radius: 12px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20; }
+.toast.show { opacity: 1; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- ===================== PIN gate ===================== -->
+<div id="gate" class="gate hidden">
+  <h1 style="font-size:22px;margin-bottom:4px">Air Monitor</h1>
+  <p class="sub" style="margin-bottom:20px">Enter the PIN to continue</p>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="••••••">
+  <div class="err hidden" id="pinErr">That PIN didn't work.</div>
+  <button class="btn" style="margin-top:14px;background:var(--s1)" id="pinGo">Open</button>
+</div>
+
+<!-- ===================== Main app ===================== -->
+<div id="app" class="app hidden">
+  <header>
+    <div>
+      <h1>Air Monitor</h1>
+      <div class="sub" id="subtitle">—</div>
+    </div>
+    <button class="iconbtn" id="settingsBtn" title="Alert limits" aria-label="Alert limits">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="var(--surface)"/><circle cx="15" cy="12" r="2" fill="var(--surface)"/><circle cx="8" cy="17" r="2" fill="var(--surface)"/></svg>
+    </button>
+  </header>
+
+  <!-- Hero: small particle count -->
+  <section class="card">
+    <h2>Small particles (PM0.5 count)</h2>
+    <div class="hero">
+      <div>
+        <div class="num"><span id="heroVal">—</span><span class="unit">per cm³</span></div>
+        <div class="what" id="heroWhat">Fine particles below 0.5 µm — the ones that reach deepest into the lungs.</div>
+      </div>
+      <span class="pill good" id="heroPill"><span class="dot"></span><span id="heroPillText">—</span></span>
+    </div>
+    <svg class="spark" id="spark" height="56" style="width:100%"></svg>
+  </section>
+
+  <!-- Tiles -->
+  <section class="card">
+    <h2>Right now</h2>
+    <div class="tiles" id="tiles"></div>
+    <div class="status" id="status" style="margin-top:14px"></div>
+  </section>
+
+  <!-- Episode button -->
+  <button class="btn" id="logBtn" style="margin-bottom:14px">Log an asthma episode</button>
+
+  <!-- Trend -->
+  <section class="card">
+    <div class="row">
+      <h2 style="margin:0">Trend</h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="trendMetric" aria-label="Metric"></select>
+        <div class="seg" id="trendRange">
+          <button aria-pressed="true" data-r="24h">24h</button>
+          <button aria-pressed="false" data-r="7d">7d</button>
+        </div>
+      </div>
+    </div>
+    <svg class="chart" id="trend"></svg>
+    <div class="legend">
+      <span><i style="background:var(--s1)"></i>10-min average</span>
+      <span><i style="background:var(--crit);height:2px;vertical-align:3px"></i>Limit</span>
+      <span><i style="background:var(--crit);border-radius:50%"></i>Alert</span>
+      <span><i style="background:var(--s2)"></i>Episode</span>
+    </div>
+  </section>
+
+  <!-- Daily max / min -->
+  <section class="card">
+    <div class="row">
+      <h2 style="margin:0">Daily high &amp; low</h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="dailyMetric" aria-label="Metric"></select>
+        <div class="seg" id="dailyRange">
+          <button aria-pressed="true" data-r="7d">7d</button>
+          <button aria-pressed="false" data-r="30d">30d</button>
+          <button aria-pressed="false" data-r="90d">90d</button>
+        </div>
+      </div>
+    </div>
+    <svg class="chart" id="daily"></svg>
+    <div class="legend">
+      <span><i style="background:var(--s1);opacity:.35"></i>Low to high</span>
+      <span><i style="background:var(--s1);border-radius:50%"></i>Daily average</span>
+      <span><i style="background:var(--crit);height:2px;vertical-align:3px"></i>Limit</span>
+      <span><i style="background:var(--s2)"></i>Episode</span>
+    </div>
+  </section>
+
+  <!-- Episodes -->
+  <section class="card">
+    <h2>Episodes</h2>
+    <ul class="list" id="episodes"></ul>
+  </section>
+
+  <!-- Alerts -->
+  <section class="card">
+    <h2>Alerts</h2>
+    <ul class="list" id="alerts"></ul>
+  </section>
+
+  <p class="hint" style="text-align:center" id="footer"></p>
+</div>
+
+<!-- ===================== Episode modal ===================== -->
+<div class="modal" id="epModal">
+  <div class="sheet">
+    <h3>Log an asthma episode</h3>
+    <div class="field"><label>When</label><input type="datetime-local" id="epWhen"></div>
+    <div class="field"><label>How bad</label>
+      <div class="sevpick" id="epSev">
+        <button aria-pressed="true" data-s="1">Mild</button>
+        <button aria-pressed="false" data-s="2">Moderate</button>
+        <button aria-pressed="false" data-s="3">Severe</button>
+      </div></div>
+    <div class="field"><label>Notes (optional)</label><textarea id="epNote" placeholder="e.g. woke up wheezing, used inhaler, after vacuuming"></textarea></div>
+    <div class="hint">The readings from the 6 hours before this time are saved with the entry, so you can see what was in the air.</div>
+    <div class="err hidden" id="epErr"></div>
+    <div class="actions">
+      <button class="btn secondary" id="epCancel">Cancel</button>
+      <button class="btn" id="epSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== Limits modal ===================== -->
+<div class="modal" id="limModal">
+  <div class="sheet">
+    <h3>Alert limits</h3>
+    <div class="limits-grid" id="limGrid"></div>
+    <div class="hint">An alert is sent when a 10-minute average crosses a limit. The monitor's LED also uses these limits, even without WiFi.</div>
+    <div class="err hidden" id="limErr"></div>
+    <div class="actions">
+      <button class="btn secondary" id="limCancel">Cancel</button>
+      <button class="btn" style="background:var(--s1)" id="limSave">Save limits</button>
+    </div>
+    <p class="hint" style="margin-top:18px"><button class="linkbtn" id="signOut">Sign out of this device</button></p>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ======================================================================
+   CONFIG — the only thing you must edit
+   ====================================================================== */
+const CONFIG = {
+  // Apps Script web-app URL (Deploy > Manage deployments > Web app URL)
+  SCRIPT_URL: 'https://script.google.com/macros/s/PASTE_DEPLOYMENT_ID_HERE/exec',
+  REFRESH_MS: 5 * 60 * 1000,     // auto-refresh while the page is open
+  STALE_MIN: 25,                 // "last reading" older than this is flagged
+};
+
+/* ======================================================================
+   Metric definitions (labels, units, decimals, which limit applies)
+   ====================================================================== */
+const METRICS = {
+  nc05: { label: 'Small particles', unit: '#/cm³', dp: 0, limit: 'nc05' },
+  pm25: { label: 'PM2.5',           unit: 'µg/m³', dp: 1, limit: 'pm25' },
+  pm1:  { label: 'PM1',             unit: 'µg/m³', dp: 1 },
+  pm10: { label: 'PM10',            unit: 'µg/m³', dp: 1, limit: 'pm10' },
+  voc:  { label: 'VOC index',       unit: '',      dp: 0, limit: 'voc' },
+  nox:  { label: 'NOx index',       unit: '',      dp: 0, limit: 'nox' },
+  co2:  { label: 'CO₂',             unit: 'ppm',   dp: 0, limit: 'co2' },
+  rh:   { label: 'Humidity',        unit: '%',     dp: 0, limit: 'rhHigh', limitLow: 'rhLow' },
+  tf:   { label: 'Temperature',     unit: '°F',    dp: 0 },
+};
+const TILE_ORDER = ['pm25', 'pm10', 'voc', 'nox', 'co2', 'rh', 'tf'];
+
+/* ======================================================================
+   State
+   ====================================================================== */
+const $ = id => document.getElementById(id);
+let pin = localStorage.getItem('aq.pin') || '';
+let data = null;            // last dashboard payload
+let trendRange = '24h', dailyRange = '7d';
+let trendMetric = localStorage.getItem('aq.trend') || 'nc05';
+let dailyMetric = localStorage.getItem('aq.daily') || 'pm25';
+let refreshTimer = null;
+
+/* ======================================================================
+   API — every call is a POST with a JSON body sent as text/plain so the
+   browser doesn't pre-flight (Apps Script can't answer OPTIONS).
+   ====================================================================== */
+async function api(body) {
+  const res = await fetch(CONFIG.SCRIPT_URL, {
+    method: 'POST', redirect: 'follow',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(Object.assign({ pin }, body)),
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const j = await res.json();
+  if (!j.ok) throw new Error(j.error || 'request failed');
+  return j;
+}
+
+/* ======================================================================
+   Formatting helpers
+   ====================================================================== */
+const fmtNum = (v, dp = 0) => (v === null || v === undefined || v === '' || isNaN(v)) ? '—' : Number(v).toFixed(dp);
+const tzFmt = (opts) => new Intl.DateTimeFormat(undefined, opts);
+const fTime = tzFmt({ hour: 'numeric', minute: '2-digit' });
+const fDay  = tzFmt({ weekday: 'short', month: 'short', day: 'numeric' });
+const fDayTime = tzFmt({ month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+function ago(epoch) {
+  const m = Math.round((Date.now() / 1000 - epoch) / 60);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + ' min ago';
+  const h = Math.round(m / 60);
+  if (h < 48) return h + ' h ago';
+  return Math.round(h / 24) + ' days ago';
+}
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2200); }
+function limitFor(key) { return data && data.limits.find(l => l.key === key); }
+function isOver(metricKey, v) {
+  const m = METRICS[metricKey];
+  if (v === null || v === undefined || v === '') return false;
+  const hi = m.limit && limitFor(m.limit), lo = m.limitLow && limitFor(m.limitLow);
+  return (hi && hi.on && v > hi.value) || (lo && lo.on && v < lo.value);
+}
+
+/* ======================================================================
+   Rendering
+   ====================================================================== */
+function render() {
+  const L = data.latest || {};
+  const st = data.status || {};
+  const lastEpoch = Number(L.epoch) || 0;
+  const stale = lastEpoch && (Date.now() / 1000 - lastEpoch) > CONFIG.STALE_MIN * 60;
+
+  // Header line
+  $('subtitle').textContent = lastEpoch
+    ? `${L.net || st.net || ''} · updated ${ago(lastEpoch)}` : 'No readings yet';
+
+  // Hero: small particles. Levels are a rough scale for this hero only;
+  // the pill goes red whenever the user's own nc05 limit is on and crossed.
+  const nc = Number(L.nc05);
+  $('heroVal').textContent = fmtNum(nc, 0);
+  const pill = $('heroPill'), lim = limitFor('nc05');
+  let cls = 'good', txt = 'Low';
+  if (!isNaN(nc)) {
+    if (lim && lim.on && nc > lim.value) { cls = 'crit'; txt = 'Over your limit'; }
+    else if (nc > 600) { cls = 'crit'; txt = 'High'; }
+    else if (nc > 200) { cls = 'warn'; txt = 'Moderate'; }
+  } else { txt = '—'; }
+  pill.className = 'pill ' + cls;
+  $('heroPillText').textContent = txt;
+  drawSpark();
+
+  // Tiles
+  $('tiles').innerHTML = TILE_ORDER.map(k => {
+    const m = METRICS[k], v = L[k];
+    const hi = m.limit && limitFor(m.limit), lo = m.limitLow && limitFor(m.limitLow);
+    let limTxt = '';
+    if (hi && hi.on && lo && lo.on) limTxt = `limits ${lo.value}–${hi.value}`;
+    else if (hi && hi.on) limTxt = `limit ${hi.value}`;
+    return `<div class="tile ${isOver(k, v) ? 'over' : ''}">
+      <div class="k">${m.label}</div>
+      <div class="v">${fmtNum(v, m.dp)}<small>${m.unit}</small></div>
+      <div class="lim">${limTxt}</div></div>`;
+  }).join('');
+
+  // Status strip
+  const batt = Number(st.batt ?? L.batt);
+  const usb = st.usb !== undefined ? !!st.usb : L.usb == 1;
+  const pct = isNaN(batt) ? null : Math.max(0, Math.min(100, Math.round((batt - 3.5) / (4.15 - 3.5) * 100)));
+  $('status').innerHTML = [
+    `Power: <b>${usb ? 'USB' : 'Battery'}</b>${pct !== null ? ` · ${pct}% (${batt.toFixed(2)} V)` : ''}`,
+    `Location: <b>${L.net || st.net || '—'}</b>`,
+    st.queued ? `Waiting to upload: <b>${st.queued}</b>` : '',
+    stale ? `<span class="stale">No reading for ${ago(lastEpoch)} — monitor may be out of WiFi range</span>` : '',
+  ].filter(Boolean).map(s => `<span>${s}</span>`).join('');
+
+  drawTrend();
+  drawDaily();
+  renderEpisodes();
+  renderAlerts();
+  $('footer').textContent = `${st.device || ''} ${st.fw ? 'fw ' + st.fw : ''} · ${data.series.length} readings loaded`;
+}
+
+function metricOptions(sel, current) {
+  sel.innerHTML = Object.keys(METRICS).map(k => `<option value="${k}" ${k === current ? 'selected' : ''}>${METRICS[k].label}</option>`).join('');
+}
+
+/* ---------- Sparkline under the hero (last 24 h of nc05) ---------- */
+function drawSpark() {
+  const svg = $('spark'), W = svg.clientWidth || 600, H = 56;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const ix = data.seriesKeys.indexOf('nc05');
+  const cutoff = data.now - 86400;
+  const pts = data.series.filter(r => r[0] >= cutoff && r[ix] !== null).map(r => [r[0], r[ix]]);
+  if (pts.length < 2) { svg.innerHTML = ''; return; }
+  const x = t => (t - cutoff) / 86400 * W;
+  const max = Math.max(...pts.map(p => p[1]), 1);
+  const y = v => H - 4 - v / max * (H - 8);
+  const d = pts.map((p, i) => (i ? 'L' : 'M') + x(p[0]).toFixed(1) + ' ' + y(p[1]).toFixed(1)).join(' ');
+  svg.innerHTML = `<path d="${d} L${x(pts[pts.length-1][0]).toFixed(1)} ${H} L${x(pts[0][0]).toFixed(1)} ${H} Z" style="fill:var(--s1);opacity:.1"/>
+                   <path d="${d}" style="fill:none;stroke:var(--s1);stroke-width:2;stroke-linejoin:round"/>
+                   <text x="${W-2}" y="10" text-anchor="end" style="font:10px system-ui;fill:var(--muted)">last 24 h</text>`;
+}
+
+/* ---------- Generic SVG chart scaffolding ---------- */
+function chartFrame(svg) {
+  const W = svg.clientWidth || 640, H = 230;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  return { W, H, pad: { l: 40, r: 12, t: 14, b: 26 } };
+}
+function niceMax(v) {
+  if (!(v > 0)) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
+}
+function yTicks(max) { return [0, .25, .5, .75, 1].map(f => f * max); }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// Vertical marker lines for episodes, with a dot at the top
+function episodeMarks(x, t0, t1, top, bottom) {
+  return (data.episodes || []).filter(e => e.epoch >= t0 && e.epoch <= t1).map(e =>
+    `<line class="ep" x1="${x(e.epoch)}" x2="${x(e.epoch)}" y1="${top}" y2="${bottom}"/>
+     <circle class="ep-dot" cx="${x(e.epoch)}" cy="${top}" r="4"><title>Episode ${fDayTime.format(e.epoch*1000)}${e.note ? ': ' + esc(e.note) : ''}</title></circle>`).join('');
+}
+
+/* ---------- Trend chart: 10-minute series ---------- */
+function drawTrend() {
+  const svg = $('trend');
+  const { W, H, pad } = chartFrame(svg);
+  const m = METRICS[trendMetric];
+  const ix = data.seriesKeys.indexOf(trendMetric);
+  const span = trendRange === '24h' ? 86400 : 7 * 86400;
+  const t1 = data.now, t0 = t1 - span;
+  const pts = data.series.filter(r => r[0] >= t0 && r[ix] !== null).map(r => [r[0], r[ix]]);
+  const hi = m.limit && limitFor(m.limit);
+  const lo = m.limitLow && limitFor(m.limitLow);
+  const x = t => pad.l + (t - t0) / span * (W - pad.l - pad.r);
+  let maxV = Math.max(...pts.map(p => p[1]), hi && hi.on ? hi.value * 1.1 : 0, 1);
+  if (trendMetric === 'rh') maxV = 100;
+  const yMax = trendMetric === 'rh' ? 100 : niceMax(maxV);
+  const y = v => pad.t + (1 - v / yMax) * (H - pad.t - pad.b);
+  let out = '';
+
+  // grid + y labels
+  yTicks(yMax).forEach(v => {
+    out += `<line class="grid" x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}"/>
+            <text x="${pad.l - 6}" y="${y(v) + 4}" text-anchor="end">${fmtNum(v, yMax < 10 ? 1 : 0)}</text>`;
+  });
+  // x labels
+  const steps = trendRange === '24h' ? (W < 520 ? 4 : 6) : 7;   // fewer labels on a phone
+  for (let i = 0; i <= steps; i++) {
+    const t = t0 + span * i / steps;
+    const lbl = trendRange === '24h' ? fTime.format(t * 1000) : fDay.format(t * 1000).split(',')[0];
+    out += `<text x="${x(t)}" y="${H - 8}" text-anchor="${i === 0 ? 'start' : i === steps ? 'end' : 'middle'}">${lbl}</text>`;
+  }
+  out += `<line class="axis" x1="${pad.l}" x2="${W - pad.r}" y1="${y(0)}" y2="${y(0)}"/>`;
+
+  // limit lines
+  [hi, lo].forEach(l => {
+    if (l && l.on && l.value <= yMax) out += `<line class="limit" x1="${pad.l}" x2="${W - pad.r}" y1="${y(l.value)}" y2="${y(l.value)}"/>
+      <text class="limit-label" x="${W - pad.r}" y="${y(l.value) - 4}" text-anchor="end">limit ${l.value}</text>`;
+  });
+
+  if (pts.length > 1) {
+    // break the line where there's a gap > 30 min (monitor offline)
+    let d = '', prev = null;
+    pts.forEach(p => { d += (prev && p[0] - prev < 1800 ? ' L' : ' M') + x(p[0]).toFixed(1) + ' ' + y(p[1]).toFixed(1); prev = p[0]; });
+    out += `<path class="line" d="${d}"/>`;
+  } else {
+    out += `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">No readings in this period</text>`;
+  }
+
+  // alerts (dots on the line) and episodes (vertical lines)
+  (data.alerts || []).filter(a => a.epoch >= t0 && METRICS[trendMetric].label === a.metric || (trendMetric === 'rh' && /Humidity/.test(a.metric) && a.epoch >= t0)).forEach(a => {
+    out += `<circle class="al" cx="${x(a.epoch)}" cy="${y(Math.min(a.value, yMax))}" r="4"><title>${esc(a.message)}</title></circle>`;
+  });
+  out += episodeMarks(x, t0, t1, pad.t, y(0));
+  out += `<g id="trendHover"></g>`;
+  svg.innerHTML = out;
+
+  // hover / touch crosshair with tooltip
+  const hover = svg.querySelector('#trendHover');
+  const onMove = ev => {
+    if (!pts.length) return;
+    const r = svg.getBoundingClientRect();
+    const cx = (ev.touches ? ev.touches[0].clientX : ev.clientX) - r.left;
+    const t = t0 + (cx / r.width * W - pad.l) / (W - pad.l - pad.r) * span;
+    let best = pts[0];
+    for (const p of pts) if (Math.abs(p[0] - t) < Math.abs(best[0] - t)) best = p;
+    const px = x(best[0]), py = y(best[1]);
+    const label = `${fmtNum(best[1], m.dp)} ${m.unit}  ·  ${trendRange === '24h' ? fTime.format(best[0] * 1000) : fDayTime.format(best[0] * 1000)}`;
+    const tw = label.length * 6.4 + 16, tx = Math.min(Math.max(px - tw / 2, pad.l), W - pad.r - tw);
+    hover.innerHTML = `<line class="cross" x1="${px}" x2="${px}" y1="${pad.t}" y2="${y(0)}"/>
+      <circle cx="${px}" cy="${py}" r="5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/>
+      <rect class="tt-bg" x="${tx}" y="${pad.t}" width="${tw}" height="22" rx="6"/>
+      <text class="tt-text" x="${tx + tw / 2}" y="${pad.t + 15}" text-anchor="middle">${esc(label)}</text>`;
+  };
+  svg.onmousemove = onMove; svg.ontouchstart = onMove; svg.ontouchmove = onMove;
+  svg.onmouseleave = () => hover.innerHTML = '';
+}
+
+/* ---------- Daily high/low chart ---------- */
+function drawDaily() {
+  const svg = $('daily');
+  const { W, H, pad } = chartFrame(svg);
+  const m = METRICS[dailyMetric];
+  const days = { '7d': 7, '30d': 30, '90d': 90 }[dailyRange];
+  const rows = (data.daily || []).slice(-days);
+  const hi = m.limit && limitFor(m.limit);
+  const lo = m.limitLow && limitFor(m.limitLow);
+  const n = Math.max(rows.length, days);
+  const slot = (W - pad.l - pad.r) / n;
+  const xi = i => pad.l + slot * (i + 0.5);
+  const vals = rows.map(r => r[dailyMetric]).filter(Boolean);
+  let maxV = Math.max(...vals.map(v => v[1]), hi && hi.on ? hi.value * 1.1 : 0, 1);
+  const yMax = dailyMetric === 'rh' ? 100 : niceMax(maxV);
+  const y = v => pad.t + (1 - v / yMax) * (H - pad.t - pad.b);
+  let out = '';
+  yTicks(yMax).forEach(v => {
+    out += `<line class="grid" x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}"/>
+            <text x="${pad.l - 6}" y="${y(v) + 4}" text-anchor="end">${fmtNum(v, yMax < 10 ? 1 : 0)}</text>`;
+  });
+  out += `<line class="axis" x1="${pad.l}" x2="${W - pad.r}" y1="${y(0)}" y2="${y(0)}"/>`;
+  [hi, lo].forEach(l => {
+    if (l && l.on && l.value <= yMax) out += `<line class="limit" x1="${pad.l}" x2="${W - pad.r}" y1="${y(l.value)}" y2="${y(l.value)}"/>`;
+  });
+  const barW = Math.max(4, Math.min(18, slot * 0.5));
+  const labelEvery = days === 7 ? 1 : days === 30 ? 5 : 15;
+  const offset = n - rows.length;            // right-align when fewer days than the range
+  rows.forEach((r, i) => {
+    const v = r[dailyMetric], cx = xi(i + offset);
+    const d = new Date(r.date + 'T12:00:00');
+    if (i % labelEvery === 0 || days === 7) out += `<text x="${cx}" y="${H - 8}" text-anchor="middle">${days === 7 ? fDay.format(d).split(',')[0] : (d.getMonth() + 1) + '/' + d.getDate()}</text>`;
+    if (!v) return;
+    const [mn, mx, av] = v;
+    const top = y(Math.min(mx, yMax)), bot = y(mn);
+    const tip = `${fDay.format(d)}: low ${fmtNum(mn, m.dp)}, high ${fmtNum(mx, m.dp)}, avg ${fmtNum(av, m.dp)} ${m.unit}`;
+    out += `<g><title>${esc(tip)}</title>
+      <rect class="range" x="${cx - barW / 2}" y="${top}" width="${barW}" height="${Math.max(2, bot - top)}" rx="3"/>
+      <circle class="avg" cx="${cx}" cy="${y(av)}" r="3.5"/>
+      ${hi && hi.on && mx > hi.value ? `<circle class="al" cx="${cx}" cy="${top - 7}" r="3"/>` : ''}
+      <rect x="${cx - slot / 2}" y="${pad.t}" width="${slot}" height="${H - pad.t - pad.b}" fill="transparent"/></g>`;
+  });
+  // episodes as marks along the top, positioned by day
+  const firstDay = rows.length ? new Date(rows[0].date + 'T00:00:00').getTime() / 1000 : 0;
+  (data.episodes || []).forEach(e => {
+    if (!rows.length || e.epoch < firstDay) return;
+    const di = Math.floor((e.epoch - firstDay) / 86400);
+    if (di >= rows.length) return;
+    const cx = xi(di + offset) + ((e.epoch - firstDay) % 86400) / 86400 * slot - slot / 2;
+    out += `<line class="ep" x1="${cx}" x2="${cx}" y1="${pad.t}" y2="${y(0)}" opacity=".7"/><circle class="ep-dot" cx="${cx}" cy="${pad.t}" r="4"><title>Episode ${fDayTime.format(e.epoch*1000)}${e.note ? ': ' + esc(e.note) : ''}</title></circle>`;
+  });
+  if (!rows.length) out += `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">No readings yet</text>`;
+  svg.innerHTML = out;
+}
+
+/* ---------- Lists ---------- */
+function renderEpisodes() {
+  const eps = (data.episodes || []).slice().sort((a, b) => b.epoch - a.epoch).slice(0, 20);
+  $('episodes').innerHTML = eps.length ? eps.map(e => {
+    const sev = ['', 'Mild', 'Moderate', 'Severe'][e.severity] || '';
+    const snap = e.snapshot === 'complete'
+      ? `Before: PM2.5 avg ${fmtNum(e.pm25avg, 1)} (peak ${fmtNum(e.pm25peak, 1)}) · particles ${fmtNum(e.nc05avg)} · VOC ${fmtNum(e.vocMax)} · NOx ${fmtNum(e.noxMax)} · CO₂ ${fmtNum(e.co2Max)} · RH ${fmtNum(e.rhAvg)}%${e.location ? ' · ' + esc(e.location) : ''}`
+      : e.snapshot === 'pending' ? 'Air readings will fill in when the monitor next uploads.' : 'No readings around this time.';
+    return `<li><span class="t">${fDayTime.format(e.epoch * 1000)}</span>
+      <div class="m"><span class="badge sev${e.severity}">${sev}</span> ${esc(e.note || '')}<small>${snap}</small>
+      <button class="linkbtn" data-del="${e.epoch}" style="font-size:12px;margin-top:3px">Delete</button></div></li>`;
+  }).join('') : '<li class="empty">No episodes logged. Use the button above when symptoms start.</li>';
+  $('episodes').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('Delete this episode?')) return;
+    try { await api({ action: 'deleteEpisode', epoch: Number(b.dataset.del) }); toast('Deleted'); load(); }
+    catch (e) { toast('Could not delete: ' + e.message); }
+  });
+}
+function renderAlerts() {
+  const al = (data.alerts || []).slice().sort((a, b) => b.epoch - a.epoch).slice(0, 30);
+  $('alerts').innerHTML = al.length ? al.map(a =>
+    `<li><span class="t">${fDayTime.format(a.epoch * 1000)}</span><div class="m">${esc(a.message)}<small>${a.push === 'sent' ? 'Push sent' : 'Logged from backlog (no push)'}</small></div></li>`
+  ).join('') : '<li class="empty">No alerts in this period.</li>';
+}
+
+/* ======================================================================
+   Loading + auth
+   ====================================================================== */
+async function load(silent) {
+  const range = { '7d': '7d', '30d': '30d', '90d': '90d' }[dailyRange];
+  try {
+    if (!silent) $('subtitle').innerHTML = '<span class="spin"></span> Loading…';
+    data = await api({ action: 'dashboard', range: dailyRange === '7d' && trendRange === '24h' ? '7d' : range });
+    render();
+  } catch (e) {
+    if (e.message === 'pin') { signOut(); return; }
+    $('subtitle').textContent = 'Could not load: ' + e.message;
+  }
+}
+function signOut() {
+  localStorage.removeItem('aq.pin'); pin = '';
+  $('app').classList.add('hidden'); $('gate').classList.remove('hidden');
+  $('limModal').classList.remove('open');
+}
+async function tryPin() {
+  const p = $('pin').value.trim();
+  if (!p) return;
+  $('pinGo').disabled = true; $('pinErr').classList.add('hidden');
+  pin = p;
+  try {
+    await api({ action: 'checkPin' });
+    localStorage.setItem('aq.pin', pin);
+    start();
+  } catch (e) { pin = ''; $('pinErr').classList.remove('hidden'); }
+  $('pinGo').disabled = false;
+}
+function start() {
+  $('gate').classList.add('hidden'); $('app').classList.remove('hidden');
+  metricOptions($('trendMetric'), trendMetric);
+  metricOptions($('dailyMetric'), dailyMetric);
+  load();
+  clearInterval(refreshTimer);
+  refreshTimer = setInterval(() => load(true), CONFIG.REFRESH_MS);
+}
+
+/* ======================================================================
+   UI wiring
+   ====================================================================== */
+$('pinGo').onclick = tryPin;
+$('pin').onkeydown = e => { if (e.key === 'Enter') tryPin(); };
+$('trendMetric').onchange = e => { trendMetric = e.target.value; localStorage.setItem('aq.trend', trendMetric); drawTrend(); };
+$('dailyMetric').onchange = e => { dailyMetric = e.target.value; localStorage.setItem('aq.daily', dailyMetric); drawDaily(); };
+function segWire(id, onPick) {
+  $(id).querySelectorAll('button').forEach(b => b.onclick = () => {
+    $(id).querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    onPick(b.dataset.r);
+  });
+}
+segWire('trendRange', r => { trendRange = r; drawTrend(); });
+segWire('dailyRange', r => { dailyRange = r; load(); });
+window.addEventListener('resize', () => { if (data) { drawSpark(); drawTrend(); drawDaily(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && data) load(true); });
+
+// Episode modal
+let epSev = 1;
+$('logBtn').onclick = () => {
+  const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  $('epWhen').value = d.toISOString().slice(0, 16);
+  $('epNote').value = ''; $('epErr').classList.add('hidden');
+  $('epModal').classList.add('open');
+};
+$('epCancel').onclick = () => $('epModal').classList.remove('open');
+$('epSev').querySelectorAll('button').forEach(b => b.onclick = () => {
+  epSev = Number(b.dataset.s);
+  $('epSev').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
+});
+$('epSave').onclick = async () => {
+  const when = new Date($('epWhen').value);
+  if (isNaN(when)) { $('epErr').textContent = 'Please pick a time.'; $('epErr').classList.remove('hidden'); return; }
+  $('epSave').disabled = true;
+  try {
+    await api({ action: 'logEpisode', epoch: Math.floor(when.getTime() / 1000), severity: epSev, note: $('epNote').value });
+    $('epModal').classList.remove('open'); toast('Episode logged'); load(true);
+  } catch (e) { $('epErr').textContent = 'Could not save: ' + e.message; $('epErr').classList.remove('hidden'); }
+  $('epSave').disabled = false;
+};
+
+// Limits modal
+$('settingsBtn').onclick = () => {
+  if (!data) return;
+  $('limGrid').innerHTML = '<div class="h">Metric</div><div class="h" style="text-align:right">Limit</div><div class="h">On</div>' +
+    data.limits.map(l => `<div class="n">${l.label}<small>${l.dir === 'low' ? 'alert below' : 'alert above'}${l.unit ? ' · ' + l.unit : ''}</small></div>
+      <input type="number" inputmode="decimal" step="any" min="0" data-k="${l.key}" value="${l.value}">
+      <input type="checkbox" data-on="${l.key}" ${l.on ? 'checked' : ''}>`).join('');
+  $('limErr').classList.add('hidden');
+  $('limModal').classList.add('open');
+};
+$('limCancel').onclick = () => $('limModal').classList.remove('open');
+$('limSave').onclick = async () => {
+  const limits = [...$('limGrid').querySelectorAll('input[data-k]')].map(i => ({
+    key: i.dataset.k, value: Number(i.value), on: $('limGrid').querySelector(`[data-on="${i.dataset.k}"]`).checked }));
+  $('limSave').disabled = true;
+  try { await api({ action: 'setLimits', limits }); $('limModal').classList.remove('open'); toast('Limits saved'); load(true); }
+  catch (e) { $('limErr').textContent = 'Could not save: ' + e.message; $('limErr').classList.remove('hidden'); }
+  $('limSave').disabled = false;
+};
+$('signOut').onclick = signOut;
+[$('epModal'), $('limModal')].forEach(m => m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); }));
+
+// Service worker (offline shell) + boot
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+if (window.__MOCK__) { pin = 'mock'; }
+if (pin) start(); else $('gate').classList.remove('hidden');
+</script>
+</body>
+</html>
